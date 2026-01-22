@@ -117,6 +117,24 @@ import { AgentState } from "../storageTypes";
 import { MessageMeta } from "../typesMessageMeta";
 import { parseMessageAsEvent } from "./messageToEvent";
 
+// Helper to extract text from user message content (handles both legacy and multimodal formats)
+type UserMessageContent =
+    | { type: 'text'; text: string }
+    | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>;
+
+function extractTextFromUserContent(content: UserMessageContent): string {
+    if ('text' in content && content.type === 'text') {
+        return content.text;
+    }
+    if (Array.isArray(content)) {
+        return content
+            .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+            .map(block => block.text)
+            .join('\n');
+    }
+    return '';
+}
+
 type ReducerMessage = {
     id: string;
     realID: string | null;
@@ -600,7 +618,7 @@ export function reducer(state: ReducerState, messages: NormalizedMessage[], agen
                 realID: msg.id,
                 role: 'user',
                 createdAt: msg.createdAt,
-                text: msg.content.text,
+                text: extractTextFromUserContent(msg.content as UserMessageContent),
                 tool: null,
                 event: null,
                 meta: msg.meta,

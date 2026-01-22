@@ -1,7 +1,10 @@
 import * as React from 'react';
-import { TextInput, Platform, View, NativeSyntheticEvent, TextInputKeyPressEventData, TextInputSelectionChangeEventData } from 'react-native';
+import { TextInput, View, NativeSyntheticEvent, TextInputKeyPressEventData, TextInputSelectionChangeEventData, NativeTouchEvent, GestureResponderEvent } from 'react-native';
 import { useUnistyles } from 'react-native-unistyles';
+import * as Clipboard from 'expo-clipboard';
 import { Typography } from '@/constants/Typography';
+import { AttachedImage } from '@/types/image';
+import { processImageForAttachmentNative } from '@/utils/imageUtils.native';
 
 export type SupportedKey = 'Enter' | 'Escape' | 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Tab';
 
@@ -24,6 +27,7 @@ export interface MultiTextInputHandle {
     setTextAndSelection: (text: string, selection: { start: number; end: number }) => void;
     focus: () => void;
     blur: () => void;
+    checkClipboardForImage: () => Promise<void>;
 }
 
 interface MultiTextInputProps {
@@ -38,6 +42,8 @@ interface MultiTextInputProps {
     onKeyPress?: OnKeyPressCallback;
     onSelectionChange?: (selection: { start: number; end: number }) => void;
     onStateChange?: (state: TextInputState) => void;
+    /** Called when an image is pasted from clipboard */
+    onImagePaste?: (image: AttachedImage) => void;
 }
 
 export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextInputProps>((props, ref) => {
@@ -48,23 +54,86 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         maxHeight = 120,
         onKeyPress,
         onSelectionChange,
-        onStateChange
+        onStateChange,
+        onImagePaste
     } = props;
 
     const { theme } = useUnistyles();
     // Track latest selection in a ref
     const selectionRef = React.useRef({ start: 0, end: 0 });
     const inputRef = React.useRef<TextInput>(null);
+    // Track if we're currently checking clipboard to prevent duplicates
+    const isCheckingClipboard = React.useRef(false);
+    // Track the last processed clipboard image to prevent duplicates
+    const lastClipboardImageHash = React.useRef<string | null>(null);
+
+    /**
+     * Check clipboard for image content
+     * This is called on focus since native doesn't have onPaste event
+     */
+    const checkClipboardForImage = React.useCallback(async () => {
+        if (!onImagePaste || isCheckingClipboard.current) return;
+
+        try {
+            isCheckingClipboard.current = true;
+
+            // Check if clipboard has an image
+            const hasImage = await Clipboard.hasImageAsync();
+            if (!hasImage) {
+                isCheckingClipboard.current = false;
+                return;
+            }
+
+            // Get the image from clipboard
+            const clipboardImage = await Clipboard.getImageAsync({ format: 'png' });
+            if (!clipboardImage?.data) {
+                isCheckingClipboard.current = false;
+                return;
+            }
+
+            // Create a simple hash to detect if this is the same image
+            const imageHash = clipboardImage.data.substring(0, 100);
+            if (imageHash === lastClipboardImageHash.current) {
+                // Same image as before, skip
+                isCheckingClipboard.current = false;
+                return;
+            }
+
+            // Process the image
+            const base64Data = clipboardImage.data.startsWith('data:')
+                ? clipboardImage.data
+                : `data:image/png;base64,${clipboardImage.data}`;
+
+            const processed = await processImageForAttachmentNative(base64Data, 'clipboard-image.png');
+
+            if ('error' in processed) {
+                console.warn('Failed to process clipboard image:', processed.error);
+                isCheckingClipboard.current = false;
+                return;
+            }
+
+            // Update hash to prevent duplicate processing
+            lastClipboardImageHash.current = imageHash;
+
+            // Notify parent about the pasted image
+            onImagePaste(processed);
+
+        } catch (err) {
+            console.error('Error checking clipboard for image:', err);
+        } finally {
+            isCheckingClipboard.current = false;
+        }
+    }, [onImagePaste]);
 
     const handleKeyPress = React.useCallback((e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
         if (!onKeyPress) return;
 
         const nativeEvent = e.nativeEvent;
         const key = nativeEvent.key;
-        
+
         // Map native key names to our normalized format
         let normalizedKey: SupportedKey | null = null;
-        
+
         switch (key) {
             case 'Enter':
                 normalizedKey = 'Enter';
@@ -98,7 +167,7 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
                 key: normalizedKey,
                 shiftKey: (nativeEvent as any).shiftKey || false
             };
-            
+
             const handled = onKeyPress(keyEvent);
             if (handled) {
                 e.preventDefault();
@@ -110,11 +179,11 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         // When text changes, assume cursor moves to end
         const selection = { start: text.length, end: text.length };
         selectionRef.current = selection;
-        
-        console.log('📝 MultiTextInput.native: Text changed:', JSON.stringify({ text, selection }));
-        
+
+        console.log('MultiTextInput.native: Text changed:', JSON.stringify({ text, selection }));
+
         onChangeText(text);
-        
+
         if (onStateChange) {
             onStateChange({ text, selection });
         }
@@ -127,12 +196,12 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         if (e.nativeEvent.selection) {
             const { start, end } = e.nativeEvent.selection;
             const selection = { start, end };
-            
+
             // Only update if selection actually changed
             if (selection.start !== selectionRef.current.start || selection.end !== selectionRef.current.end) {
                 selectionRef.current = selection;
-                console.log('📍 MultiTextInput.native: Selection changed:', JSON.stringify(selection));
-                
+                console.log('MultiTextInput.native: Selection changed:', JSON.stringify(selection));
+
                 if (onSelectionChange) {
                     onSelectionChange(selection);
                 }
@@ -143,21 +212,34 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         }
     }, [value, onSelectionChange, onStateChange]);
 
+    /**
+     * Handle focus - check clipboard for images
+     */
+    const handleFocus = React.useCallback(() => {
+        // Check clipboard for image when input gains focus
+        if (onImagePaste) {
+            // Small delay to let focus settle
+            setTimeout(() => {
+                checkClipboardForImage();
+            }, 100);
+        }
+    }, [checkClipboardForImage, onImagePaste]);
+
     // Imperative handle for direct control
     React.useImperativeHandle(ref, () => ({
         setTextAndSelection: (text: string, selection: { start: number; end: number }) => {
-            console.log('🎯 MultiTextInput.native: setTextAndSelection:', JSON.stringify({ text, selection }));
-            
+            console.log('MultiTextInput.native: setTextAndSelection:', JSON.stringify({ text, selection }));
+
             if (inputRef.current) {
                 // Use setNativeProps for direct manipulation
                 inputRef.current.setNativeProps({
                     text: text,
                     selection: selection
                 });
-                
+
                 // Update our ref
                 selectionRef.current = selection;
-                
+
                 // Notify through callbacks
                 onChangeText(text);
                 if (onStateChange) {
@@ -173,8 +255,9 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         },
         blur: () => {
             inputRef.current?.blur();
-        }
-    }), [onChangeText, onStateChange, onSelectionChange]);
+        },
+        checkClipboardForImage
+    }), [onChangeText, onStateChange, onSelectionChange, checkClipboardForImage]);
 
     return (
         <View style={{ width: '100%' }}>
@@ -199,6 +282,7 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
                 onChangeText={handleTextChange}
                 onKeyPress={handleKeyPress}
                 onSelectionChange={handleSelectionChange}
+                onFocus={handleFocus}
                 multiline={true}
                 autoCapitalize="sentences"
                 autoCorrect={true}

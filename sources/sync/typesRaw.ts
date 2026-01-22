@@ -5,6 +5,29 @@ import { MessageMetaSchema, MessageMeta } from './typesMessageMeta';
 // Raw types
 //
 
+// Content block schemas for multimodal messages
+const textContentBlockSchema = z.object({
+    type: z.literal('text'),
+    text: z.string()
+});
+
+const imageContentBlockSchema = z.object({
+    type: z.literal('image'),
+    source: z.object({
+        type: z.literal('base64'),
+        media_type: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+        data: z.string()
+    })
+});
+
+const contentBlockSchema = z.union([textContentBlockSchema, imageContentBlockSchema]);
+
+// User message content can be legacy format or array of content blocks
+const userMessageContentSchema = z.union([
+    textContentBlockSchema,
+    z.array(contentBlockSchema)
+]);
+
 // Usage data type from Claude API
 const usageDataSchema = z.object({
     input_tokens: z.number(),
@@ -114,10 +137,7 @@ const rawRecordSchema = z.discriminatedUnion('role', [
     }),
     z.object({
         role: z.literal('user'),
-        content: z.object({
-            type: z.literal('text'),
-            text: z.string()
-        }),
+        content: userMessageContentSchema,
         meta: MessageMetaSchema.optional()
     })
 ]);
@@ -169,12 +189,14 @@ type NormalizedAgentContent =
         prompt: string
     };
 
+// User message content type - supports both legacy and multimodal formats
+type UserMessageContent =
+    | { type: 'text'; text: string }
+    | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string } }>;
+
 export type NormalizedMessage = ({
     role: 'user'
-    content: {
-        type: 'text';
-        text: string;
-    }
+    content: UserMessageContent
 } | {
     role: 'agent'
     content: NormalizedAgentContent[]

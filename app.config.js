@@ -13,7 +13,7 @@ const bundleId = {
 export default {
     expo: {
         name,
-        slug: "happy",
+        slug: "happy-kdog",
         version: "1.6.2",
         runtimeVersion: "18",
         orientation: "default",
@@ -150,7 +150,7 @@ export default {
             ]
         ],
         updates: {
-            url: "https://u.expo.dev/4558dd3d-cd5a-47cd-bad9-e591a241cc06",
+            url: "https://u.expo.dev/8d44311b-82f1-498f-a06a-b4e0f06467e2",
             requestHeaders: {
                 "expo-channel-name": "production"
             }
@@ -163,7 +163,7 @@ export default {
                 root: "./sources/app"
             },
             eas: {
-                projectId: "4558dd3d-cd5a-47cd-bad9-e591a241cc06"
+                projectId: "8d44311b-82f1-498f-a06a-b4e0f06467e2"
             },
             app: {
                 postHogKey: process.env.EXPO_PUBLIC_POSTHOG_API_KEY,
@@ -172,6 +172,6 @@ export default {
                 revenueCatStripeKey: process.env.EXPO_PUBLIC_REVENUE_CAT_STRIPE
             }
         },
-        owner: "bulkacorp"
+        owner: "kdog1828"
     }
 };

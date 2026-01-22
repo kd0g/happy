@@ -39,6 +39,8 @@ import { fetchFeed } from './apiFeed';
 import { FeedItem } from './feedTypes';
 import { UserProfile } from './friendTypes';
 import { initializeTodoSync } from '../-zen/model/ops';
+import { AttachedImage } from '@/types/image';
+import { toClaudeImageContent } from '@/utils/imageUtils';
 
 class Sync {
     // Spawned agents (especially in spawn mode) can take noticeable time to connect.
@@ -209,7 +211,7 @@ class Sync {
     }
 
 
-    async sendMessage(sessionId: string, text: string, displayText?: string) {
+    async sendMessage(sessionId: string, text: string, displayText?: string, images?: AttachedImage[]) {
 
         // Get encryption
         const encryption = this.encryption.getSessionEncryption(sessionId);
@@ -253,34 +255,76 @@ class Sync {
         const model: string | null = null;
         const fallbackModel: string | null = null;
 
-        // Create user message content with metadata
-        const content: RawRecord = {
+        // Build message content
+        type MimeType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+        type ImageBlock = { type: 'image'; source: { type: 'base64'; media_type: MimeType; data: string } };
+        type TextBlock = { type: 'text'; text: string };
+
+        const ready = await this.waitForAgentReady(sessionId);
+        if (!ready) {
+            log.log(`Session ${sessionId} not ready after timeout, sending anyway`);
+        }
+
+        // If images present, send each image as a separate message first
+        // This avoids encryption stack overflow with large combined payloads
+        if (images && images.length > 0) {
+            for (let i = 0; i < images.length; i++) {
+                const image = images[i];
+                const imageLocalId = `${localId}_img_${i}`;
+                const imageContent: RawRecord = {
+                    role: 'user',
+                    content: [toClaudeImageContent(image)],
+                    meta: {
+                        sentFrom,
+                        permissionMode: permissionMode || 'default',
+                        model,
+                        fallbackModel,
+                    }
+                };
+
+                const encryptedImageRecord = await encryption.encryptRawRecord(imageContent);
+
+                // Apply locally
+                const imageCreatedAt = Date.now();
+                const normalizedImageMsg = normalizeRawMessage(imageLocalId, imageLocalId, imageCreatedAt, imageContent);
+                if (normalizedImageMsg) {
+                    this.applyMessages(sessionId, [normalizedImageMsg]);
+                }
+
+                // Send to server
+                apiSocket.send('message', {
+                    sid: sessionId,
+                    message: encryptedImageRecord,
+                    localId: imageLocalId,
+                    sentFrom,
+                    permissionMode: permissionMode || 'default'
+                });
+
+                // Small delay between images to ensure order
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        }
+
+        // Send text message (always, even if empty text with images - it triggers Claude)
+        const textContent: RawRecord = {
             role: 'user',
-            content: {
-                type: 'text',
-                text
-            },
+            content: { type: 'text', text: text || (images && images.length > 0 ? '위 이미지를 분석해주세요.' : '') },
             meta: {
                 sentFrom,
                 permissionMode: permissionMode || 'default',
                 model,
                 fallbackModel,
                 appendSystemPrompt: systemPrompt,
-                ...(displayText && { displayText }) // Add displayText if provided
+                ...(displayText && { displayText })
             }
         };
-        const encryptedRawRecord = await encryption.encryptRawRecord(content);
+        const encryptedRawRecord = await encryption.encryptRawRecord(textContent);
 
         // Add to messages - normalize the raw record
         const createdAt = Date.now();
-        const normalizedMessage = normalizeRawMessage(localId, localId, createdAt, content);
+        const normalizedMessage = normalizeRawMessage(localId, localId, createdAt, textContent);
         if (normalizedMessage) {
             this.applyMessages(sessionId, [normalizedMessage]);
-        }
-
-        const ready = await this.waitForAgentReady(sessionId);
-        if (!ready) {
-            log.log(`Session ${sessionId} not ready after timeout, sending anyway`);
         }
 
         // Send message with optional permission mode and source identifier

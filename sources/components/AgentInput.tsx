@@ -21,6 +21,9 @@ import { useSetting } from '@/sync/storage';
 import { Theme } from '@/theme';
 import { t } from '@/text';
 import { Metadata } from '@/sync/storageTypes';
+import { ImagePreview } from './ImagePreview';
+import { AttachedImage, IMAGE_CONSTRAINTS } from '@/types/image';
+import { fileToBase64, processImageForAttachment } from '@/utils/imageUtils';
 
 interface AgentInputProps {
     value: string;
@@ -64,6 +67,10 @@ interface AgentInputProps {
     isSendDisabled?: boolean;
     isSending?: boolean;
     minHeight?: number;
+    /** Attached images (web only for now) */
+    attachedImages?: AttachedImage[];
+    /** Callback when images change */
+    onImagesChange?: (images: AttachedImage[]) => void;
 }
 
 const MAX_CONTEXT_SIZE = 190000;
@@ -304,9 +311,99 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const [isAborting, setIsAborting] = React.useState(false);
     const shakerRef = React.useRef<ShakeInstance>(null);
     const inputRef = React.useRef<MultiTextInputHandle>(null);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     // Forward ref to the MultiTextInput
     React.useImperativeHandle(ref, () => inputRef.current!, []);
+
+    // Image attachment handlers (web only)
+    const handleImageFile = React.useCallback(async (file: File) => {
+        if (!props.onImagesChange) return;
+
+        const currentImages = props.attachedImages || [];
+
+        // Check max images limit
+        if (currentImages.length >= IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE) {
+            console.warn(`Maximum ${IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE} images allowed`);
+            hapticsError();
+            return;
+        }
+
+        try {
+            const base64 = await fileToBase64(file);
+            const result = await processImageForAttachment(base64, file.name);
+
+            if ('error' in result) {
+                console.error('Image processing error:', result.error);
+                hapticsError();
+                return;
+            }
+
+            props.onImagesChange([...currentImages, result]);
+            hapticsLight();
+        } catch (error) {
+            console.error('Failed to process image:', error);
+            hapticsError();
+        }
+    }, [props.attachedImages, props.onImagesChange]);
+
+    const handleRemoveImage = React.useCallback((id: string) => {
+        if (!props.onImagesChange) return;
+        const currentImages = props.attachedImages || [];
+        props.onImagesChange(currentImages.filter(img => img.id !== id));
+        hapticsLight();
+    }, [props.attachedImages, props.onImagesChange]);
+
+    const handleImageButtonPress = React.useCallback(() => {
+        if (Platform.OS === 'web' && fileInputRef.current) {
+            fileInputRef.current.click();
+        }
+        hapticsLight();
+    }, []);
+
+    const handleFileInputChange = React.useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0 || !props.onImagesChange) {
+            e.target.value = '';
+            return;
+        }
+
+        const currentImages = props.attachedImages || [];
+        const remainingSlots = IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE - currentImages.length;
+
+        if (remainingSlots <= 0) {
+            console.warn(`Maximum ${IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE} images allowed`);
+            hapticsError();
+            e.target.value = '';
+            return;
+        }
+
+        // Process all files (up to remaining slots)
+        const filesToProcess = Array.from(files).slice(0, remainingSlots);
+        const newImages: AttachedImage[] = [];
+
+        for (const file of filesToProcess) {
+            try {
+                const base64 = await fileToBase64(file);
+                const result = await processImageForAttachment(base64, file.name);
+                if (!('error' in result)) {
+                    newImages.push(result);
+                } else {
+                    console.error('Image processing error:', result.error);
+                }
+            } catch (error) {
+                console.error('Failed to process image:', error);
+            }
+        }
+
+        if (newImages.length > 0) {
+            props.onImagesChange([...currentImages, ...newImages]);
+            hapticsLight();
+        }
+
+        // Reset the input so the same file can be selected again
+        e.target.value = '';
+    }, [props.attachedImages, props.onImagesChange]);
 
     // Autocomplete state - track text and selection together
     const [inputState, setInputState] = React.useState<TextInputState>({
@@ -685,6 +782,14 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 )}
                 {/* Unified panel containing input and action buttons */}
                 <View style={styles.unifiedPanel}>
+                    {/* Image preview (web only) */}
+                    {Platform.OS === 'web' && props.attachedImages && props.attachedImages.length > 0 && (
+                        <ImagePreview
+                            images={props.attachedImages}
+                            onRemove={handleRemoveImage}
+                        />
+                    )}
+
                     {/* Input field */}
                     <View style={[styles.inputContainer, props.minHeight ? { minHeight: props.minHeight } : undefined]}>
                         <MultiTextInput
@@ -697,6 +802,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             onKeyPress={handleKeyPress}
                             onStateChange={handleInputStateChange}
                             maxHeight={120}
+                            onImagePaste={Platform.OS === 'web' ? handleImageFile as any : undefined}
                         />
                     </View>
 
@@ -723,6 +829,30 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     <Octicons
                                         name={'gear'}
                                         size={16}
+                                        color={theme.colors.button.secondary.tint}
+                                    />
+                                </Pressable>
+                            )}
+
+                            {/* Image attachment button (web only) */}
+                            {Platform.OS === 'web' && props.onImagesChange && (
+                                <Pressable
+                                    onPress={handleImageButtonPress}
+                                    hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
+                                    style={(p) => ({
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        borderRadius: Platform.select({ default: 16, android: 20 }),
+                                        paddingHorizontal: 8,
+                                        paddingVertical: 6,
+                                        justifyContent: 'center',
+                                        height: 32,
+                                        opacity: p.pressed ? 0.7 : 1,
+                                    })}
+                                >
+                                    <Ionicons
+                                        name="image-outline"
+                                        size={18}
                                         color={theme.colors.button.secondary.tint}
                                     />
                                 </Pressable>
@@ -941,6 +1071,18 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                         </View>
                     </View>
                 </View>
+
+                {/* Hidden file input for image upload (web only) */}
+                {Platform.OS === 'web' && props.onImagesChange && (
+                    <input
+                        ref={fileInputRef as any}
+                        type="file"
+                        accept={IMAGE_CONSTRAINTS.SUPPORTED_TYPES.join(',')}
+                        multiple
+                        onChange={handleFileInputChange as any}
+                        style={{ display: 'none' }}
+                    />
+                )}
             </View>
         </View>
     );

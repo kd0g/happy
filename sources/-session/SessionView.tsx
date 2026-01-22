@@ -29,6 +29,7 @@ import { useMemo } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUnistyles } from 'react-native-unistyles';
+import { AttachedImage } from '@/types/image';
 
 export const SessionView = React.memo((props: { id: string }) => {
     const sessionId = props.id;
@@ -156,6 +157,7 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     const isLandscape = useIsLandscape();
     const deviceType = useDeviceType();
     const [message, setMessage] = React.useState('');
+    const [attachedImages, setAttachedImages] = React.useState<AttachedImage[]>([]);
     const realtimeStatus = useRealtimeStatus();
     const { messages, isLoaded } = useSessionMessages(sessionId);
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
@@ -280,13 +282,17 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                 isPulsing: sessionStatus.isPulsing
             }}
             onSend={() => {
-                if (message.trim()) {
+                if (message.trim() || attachedImages.length > 0) {
+                    const imagesToSend = attachedImages.length > 0 ? [...attachedImages] : undefined;
                     setMessage('');
+                    setAttachedImages([]);
                     clearDraft();
-                    sync.sendMessage(sessionId, message);
+                    sync.sendMessage(sessionId, message, undefined, imagesToSend);
                     trackMessageSent();
                 }
             }}
+            attachedImages={attachedImages}
+            onImagesChange={setAttachedImages}
             onMicPress={micButtonState.onMicPress}
             isMicActive={micButtonState.isMicActive}
             onAbort={() => sessionAbort(sessionId)}
