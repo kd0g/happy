@@ -26,6 +26,7 @@ import { getBuiltInProfile } from '@/sync/profileUtils';
 import { ImagePreview } from './ImagePreview';
 import { AttachedImage, IMAGE_CONSTRAINTS } from '@/types/image';
 import { fileToBase64, processImageForAttachment } from '@/utils/imageUtils';
+import { useImagePicker, showImageSourceActionSheet } from '@/hooks/useImagePicker';
 
 interface AgentInputProps {
     value: string;
@@ -329,6 +330,36 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
     const agentInputEnterToSend = useSetting('agentInputEnterToSend');
 
+    // Image picker for native platforms
+    const handleNativeImagesPicked = React.useCallback((images: AttachedImage[]) => {
+        if (!props.onImagesChange) return;
+        const currentImages = props.attachedImages || [];
+        const remainingSlots = IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE - currentImages.length;
+        const imagesToAdd = images.slice(0, remainingSlots);
+        props.onImagesChange([...currentImages, ...imagesToAdd]);
+    }, [props.attachedImages, props.onImagesChange]);
+
+    // Handle single image paste from native clipboard
+    const handleNativeImagePaste = React.useCallback((image: AttachedImage) => {
+        if (!props.onImagesChange) return;
+        const currentImages = props.attachedImages || [];
+        if (currentImages.length >= IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE) {
+            console.warn(`Maximum ${IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE} images allowed`);
+            hapticsError();
+            return;
+        }
+        props.onImagesChange([...currentImages, image]);
+        hapticsLight();
+    }, [props.attachedImages, props.onImagesChange]);
+
+    const { pickFromGallery, takePhoto, isLoading: isPickingImage } = useImagePicker({
+        maxImages: IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE - (props.attachedImages?.length || 0),
+        onImagesPicked: handleNativeImagesPicked,
+        onError: (error) => {
+            console.error('Image picker error:', error);
+            hapticsError();
+        },
+    });
 
     // Abort button state
     const [isAborting, setIsAborting] = React.useState(false);
@@ -378,11 +409,16 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     }, [props.attachedImages, props.onImagesChange]);
 
     const handleImageButtonPress = React.useCallback(() => {
-        if (Platform.OS === 'web' && fileInputRef.current) {
-            fileInputRef.current.click();
-        }
         hapticsLight();
-    }, []);
+        if (Platform.OS === 'web') {
+            if (fileInputRef.current) {
+                fileInputRef.current.click();
+            }
+        } else {
+            // Native: show action sheet to choose source
+            showImageSourceActionSheet(pickFromGallery, takePhoto);
+        }
+    }, [pickFromGallery, takePhoto]);
 
     const handleFileInputChange = React.useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
@@ -1047,7 +1083,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             onKeyPress={handleKeyPress}
                             onStateChange={handleInputStateChange}
                             maxHeight={120}
-                            onImagePaste={Platform.OS === 'web' ? handleImageFile as any : undefined}
+                            onImagePaste={Platform.OS === 'web' ? handleImageFile as any : handleNativeImagePaste}
                         />
                     </View>
 
@@ -1082,8 +1118,8 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     </Pressable>
                                 )}
 
-                                {/* Image attachment button (web only) */}
-                                {Platform.OS === 'web' && props.onImagesChange && (
+                                {/* Image attachment button */}
+                                {props.onImagesChange && (
                                     <Pressable
                                         onPress={handleImageButtonPress}
                                         hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
