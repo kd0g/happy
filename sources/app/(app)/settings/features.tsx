@@ -9,10 +9,12 @@ import { t } from '@/text';
 
 export default function FeaturesSettingsScreen() {
     const [experiments, setExperiments] = useSettingMutable('experiments');
+    const [agentInputEnterToSend, setAgentInputEnterToSend] = useSettingMutable('agentInputEnterToSend');
     const [commandPaletteEnabled, setCommandPaletteEnabled] = useLocalSettingMutable('commandPaletteEnabled');
     const [markdownCopyV2, setMarkdownCopyV2] = useLocalSettingMutable('markdownCopyV2');
     const [hideInactiveSessions, setHideInactiveSessions] = useSettingMutable('hideInactiveSessions');
-    
+    const [useEnhancedSessionWizard, setUseEnhancedSessionWizard] = useSettingMutable('useEnhancedSessionWizard');
+
     return (
         <ItemList style={{ paddingTop: 0 }}>
             {/* Experimental Features */}
@@ -56,6 +58,20 @@ export default function FeaturesSettingsScreen() {
                     }
                     showChevron={false}
                 />
+                <Item
+                    title={t('settingsFeatures.enhancedSessionWizard')}
+                    subtitle={useEnhancedSessionWizard
+                        ? t('settingsFeatures.enhancedSessionWizardEnabled')
+                        : t('settingsFeatures.enhancedSessionWizardDisabled')}
+                    icon={<Ionicons name="sparkles-outline" size={29} color="#AF52DE" />}
+                    rightElement={
+                        <Switch
+                            value={useEnhancedSessionWizard}
+                            onValueChange={setUseEnhancedSessionWizard}
+                        />
+                    }
+                    showChevron={false}
+                />
             </ItemGroup>
 
             {/* Web-only Features */}
@@ -64,6 +80,18 @@ export default function FeaturesSettingsScreen() {
                     title={t('settingsFeatures.webFeatures')}
                     footer={t('settingsFeatures.webFeaturesDescription')}
                 >
+                    <Item
+                        title={t('settingsFeatures.enterToSend')}
+                        subtitle={agentInputEnterToSend ? t('settingsFeatures.enterToSendEnabled') : t('settingsFeatures.enterToSendDisabled')}
+                        icon={<Ionicons name="return-down-forward-outline" size={29} color="#007AFF" />}
+                        rightElement={
+                            <Switch
+                                value={agentInputEnterToSend}
+                                onValueChange={setAgentInputEnterToSend}
+                            />
+                        }
+                        showChevron={false}
+                    />
                     <Item
                         title={t('settingsFeatures.commandPalette')}
                         subtitle={commandPaletteEnabled ? t('settingsFeatures.commandPaletteEnabled') : t('settingsFeatures.commandPaletteDisabled')}

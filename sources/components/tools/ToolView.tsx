@@ -50,6 +50,14 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
     let icon = <Ionicons name="construct-outline" size={18} color={theme.colors.textSecondary} />;
     let noStatus = false;
     let hideDefaultError = false;
+    
+    // For Gemini: unknown tools should be rendered as minimal (hidden)
+    // This prevents showing raw INPUT/OUTPUT for internal Gemini tools
+    // that we haven't explicitly added to knownTools
+    const isGemini = props.metadata?.flavor === 'gemini';
+    if (!knownTool && isGemini) {
+        minimal = true;
+    }
 
     // Extract status first to potentially use as title
     if (knownTool && typeof knownTool.extractStatus === 'function') {
@@ -203,7 +211,7 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
                 if (SpecificToolView) {
                     return (
                         <View style={styles.content}>
-                            <SpecificToolView tool={tool} metadata={props.metadata} messages={props.messages ?? []} />
+                            <SpecificToolView tool={tool} metadata={props.metadata} messages={props.messages ?? []} sessionId={sessionId} />
                             {tool.state === 'error' && tool.result &&
                                 !(tool.permission && (tool.permission.status === 'denied' || tool.permission.status === 'canceled')) &&
                                 !hideDefaultError && (
@@ -246,7 +254,8 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
             })()}
 
             {/* Permission footer - always renders when permission exists to maintain consistent height */}
-            {tool.permission && sessionId && (
+            {/* AskUserQuestion has its own Submit button UI - no permission footer needed */}
+            {tool.permission && sessionId && tool.name !== 'AskUserQuestion' && (
                 <PermissionFooter permission={tool.permission} sessionId={sessionId} toolName={tool.name} toolInput={tool.input} metadata={props.metadata} />
             )}
         </View>

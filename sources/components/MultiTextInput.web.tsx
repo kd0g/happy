@@ -64,7 +64,7 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
     const handleKeyDown = React.useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (!onKeyPress) return;
 
-        const isComposing = e.nativeEvent.isComposing || (e as any).isComposing || e.keyCode === 229;
+        const isComposing = e.nativeEvent.isComposing || (e.nativeEvent as any).isComposing || e.keyCode === 229;
         if (isComposing) {
             return;
         }
@@ -130,11 +130,11 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
 
     const handleSelect = React.useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
         const target = e.target as HTMLTextAreaElement;
-        const selection = {
-            start: target.selectionStart,
-            end: target.selectionEnd
+        const selection = { 
+            start: target.selectionStart, 
+            end: target.selectionEnd 
         };
-
+        
         if (onSelectionChange) {
             onSelectionChange(selection);
         }
