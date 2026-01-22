@@ -6,8 +6,16 @@
 import { useState, useCallback } from 'react';
 import { Platform, Alert, Linking } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { AttachedImage, IMAGE_CONSTRAINTS } from '@/types/image';
-import { processImageForAttachmentNative } from '@/utils/imageUtils.native';
+import { generateImageId } from '@/utils/imageUtils';
+
+const DEBUG_IMAGE_PICKER = false;
+function debugAlert(title: string, message: string) {
+  if (DEBUG_IMAGE_PICKER) {
+    Alert.alert(`[PICKER] ${title}`, message);
+  }
+}
 
 export type ImagePickerSource = 'gallery' | 'camera';
 
@@ -120,70 +128,132 @@ export function useImagePicker(options: UseImagePickerOptions = {}): UseImagePic
     async (assets: ImagePicker.ImagePickerAsset[]): Promise<AttachedImage[]> => {
       const results: AttachedImage[] = [];
 
+      debugAlert('processAssets', `Processing ${assets.length} asset(s)`);
+
       for (const asset of assets) {
-        const processed = await processImageForAttachmentNative(
-          asset.uri,
-          asset.fileName ?? undefined
-        );
+        debugAlert('Asset', `URI: ${asset.uri?.substring(0, 60)}...\nSize: ${asset.width}x${asset.height}\nType: ${asset.mimeType || 'unknown'}`);
 
-        if ('error' in processed) {
-          console.warn('Failed to process image:', processed.error);
-          onError?.(processed.error);
-          continue;
+        try {
+          // Use base64 from picker if available, otherwise read from file system
+          let base64Data: string;
+
+          if (asset.base64) {
+            base64Data = asset.base64;
+            debugAlert('Base64', 'Using picker base64');
+          } else {
+            // Read file as base64 using expo-file-system
+            debugAlert('FileSystem', 'Reading file...');
+            base64Data = await FileSystem.readAsStringAsync(asset.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            debugAlert('FileSystem', `Read ${base64Data.length} chars`);
+          }
+
+          // Determine MIME type
+          const mimeType = asset.mimeType || getMimeTypeFromUri(asset.uri);
+
+          // Create full data URL
+          const dataUrl = `data:${mimeType};base64,${base64Data}`;
+
+          // Estimate file size (base64 is ~33% larger than binary)
+          const estimatedSize = Math.ceil((base64Data.length * 3) / 4);
+
+          // Check size limit (5MB)
+          if (estimatedSize > IMAGE_CONSTRAINTS.MAX_FILE_SIZE) {
+            const errorMsg = `Image too large: ${Math.round(estimatedSize / 1024 / 1024)}MB (max 5MB)`;
+            debugAlert('Size Error', errorMsg);
+            onError?.(errorMsg);
+            continue;
+          }
+
+          const processed: AttachedImage = {
+            id: generateImageId(),
+            base64: dataUrl,
+            mimeType: mimeType as AttachedImage['mimeType'],
+            width: asset.width,
+            height: asset.height,
+            fileName: asset.fileName ?? undefined,
+            fileSize: estimatedSize,
+          };
+
+          debugAlert('Processed OK', `ID: ${processed.id}\n${processed.width}x${processed.height}`);
+          results.push(processed);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          debugAlert('Exception', errMsg);
+          onError?.(errMsg);
         }
-
-        // Override dimensions from picker if available
-        if (asset.width && asset.height) {
-          processed.width = asset.width;
-          processed.height = asset.height;
-        }
-
-        results.push(processed);
       }
 
+      debugAlert('Results', `Returning ${results.length} image(s)`);
       return results;
     },
     [onError]
   );
 
+  // Helper to get MIME type from URI
+  function getMimeTypeFromUri(uri: string): string {
+    const lowerUri = uri.toLowerCase();
+    if (lowerUri.endsWith('.png')) return 'image/png';
+    if (lowerUri.endsWith('.gif')) return 'image/gif';
+    if (lowerUri.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
   /**
    * Pick images from gallery
    */
   const pickFromGallery = useCallback(async (): Promise<AttachedImage[]> => {
+    debugAlert('pickFromGallery', 'Starting...');
     try {
       // Request permission first
       const hasPermission = await requestMediaLibraryPermission();
       if (!hasPermission) {
+        debugAlert('Permission', 'Denied');
         return [];
       }
+      debugAlert('Permission', 'Granted');
 
       setIsLoading(true);
 
+      debugAlert('Launch', 'Opening image library...');
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsMultipleSelection: maxImages > 1,
         selectionLimit: maxImages,
-        quality: 0.9,
+        quality: 0.85,
         exif: false,
+        base64: true, // Get base64 directly from picker
       });
 
-      if (result.canceled || !result.assets?.length) {
+      if (result.canceled) {
+        debugAlert('Canceled', 'User canceled');
         setIsLoading(false);
         return [];
       }
 
+      if (!result.assets?.length) {
+        debugAlert('No Assets', 'No assets returned');
+        setIsLoading(false);
+        return [];
+      }
+
+      debugAlert('Selected', `${result.assets.length} image(s)`);
       const images = await processAssets(result.assets);
 
       if (images.length > 0) {
+        debugAlert('Calling', `onImagesPicked with ${images.length} images`);
         onImagesPicked?.(images);
+      } else {
+        debugAlert('Warning', 'No images after processing');
       }
 
       setIsLoading(false);
       return images;
     } catch (err) {
       setIsLoading(false);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to pick images';
-      console.error('Error picking images:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      debugAlert('Error', errorMessage);
       onError?.(errorMessage);
       return [];
     }
@@ -204,8 +274,9 @@ export function useImagePicker(options: UseImagePickerOptions = {}): UseImagePic
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
-        quality: 0.9,
+        quality: 0.85,
         exif: false,
+        base64: true, // Get base64 directly from camera
       });
 
       if (result.canceled || !result.assets?.length) {

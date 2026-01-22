@@ -25,10 +25,9 @@ import { AIBackendProfile, getProfileEnvironmentVariables, validateProfileForAge
 import { getBuiltInProfile } from '@/sync/profileUtils';
 import { ImagePreview } from './ImagePreview';
 import { AttachedImage, IMAGE_CONSTRAINTS } from '@/types/image';
-import { fileToBase64, processImageForAttachment } from '@/utils/imageUtils';
+import { fileToBase64, processImageForAttachment, generateImageId } from '@/utils/imageUtils';
 import { useImagePicker, showImageSourceActionSheet } from '@/hooks/useImagePicker';
 import * as Clipboard from 'expo-clipboard';
-import { processImageForAttachmentNative } from '@/utils/imageUtils.native';
 
 interface AgentInputProps {
     value: string;
@@ -434,17 +433,34 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 return;
             }
 
-            const base64Data = clipboardImage.data.startsWith('data:')
-                ? clipboardImage.data
-                : `data:image/png;base64,${clipboardImage.data}`;
+            // Get raw base64 data (without data: prefix if present)
+            const rawBase64 = clipboardImage.data.startsWith('data:')
+                ? clipboardImage.data.split(',')[1]
+                : clipboardImage.data;
 
-            const processed = await processImageForAttachmentNative(base64Data, 'clipboard-image.png');
+            // Create full data URL
+            const base64DataUrl = `data:image/png;base64,${rawBase64}`;
 
-            if ('error' in processed) {
-                console.error('Clipboard image processing error:', processed.error);
+            // Estimate file size
+            const estimatedSize = Math.ceil((rawBase64.length * 3) / 4);
+
+            // Check size limit (5MB)
+            if (estimatedSize > IMAGE_CONSTRAINTS.MAX_FILE_SIZE) {
+                console.error(`Image too large: ${Math.round(estimatedSize / 1024 / 1024)}MB`);
                 hapticsError();
                 return;
             }
+
+            // Create image object directly (no expo-image-manipulator)
+            const processed: AttachedImage = {
+                id: generateImageId(),
+                base64: base64DataUrl,
+                mimeType: 'image/png',
+                width: clipboardImage.size?.width || 0,
+                height: clipboardImage.size?.height || 0,
+                fileName: 'clipboard-image.png',
+                fileSize: estimatedSize,
+            };
 
             props.onImagesChange([...currentImages, processed]);
             hapticsLight();
