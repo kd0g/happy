@@ -27,6 +27,8 @@ import { ImagePreview } from './ImagePreview';
 import { AttachedImage, IMAGE_CONSTRAINTS } from '@/types/image';
 import { fileToBase64, processImageForAttachment } from '@/utils/imageUtils';
 import { useImagePicker, showImageSourceActionSheet } from '@/hooks/useImagePicker';
+import * as Clipboard from 'expo-clipboard';
+import { processImageForAttachmentNative } from '@/utils/imageUtils.native';
 
 interface AgentInputProps {
     value: string;
@@ -408,6 +410,50 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         hapticsLight();
     }, [props.attachedImages, props.onImagesChange]);
 
+    // Paste image from clipboard (native only)
+    const pasteFromClipboard = React.useCallback(async () => {
+        if (!props.onImagesChange) return;
+
+        try {
+            const hasImage = await Clipboard.hasImageAsync();
+            if (!hasImage) {
+                hapticsError();
+                return;
+            }
+
+            const clipboardImage = await Clipboard.getImageAsync({ format: 'png' });
+            if (!clipboardImage?.data) {
+                hapticsError();
+                return;
+            }
+
+            const currentImages = props.attachedImages || [];
+            if (currentImages.length >= IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE) {
+                console.warn(`Maximum ${IMAGE_CONSTRAINTS.MAX_IMAGES_PER_MESSAGE} images allowed`);
+                hapticsError();
+                return;
+            }
+
+            const base64Data = clipboardImage.data.startsWith('data:')
+                ? clipboardImage.data
+                : `data:image/png;base64,${clipboardImage.data}`;
+
+            const processed = await processImageForAttachmentNative(base64Data, 'clipboard-image.png');
+
+            if ('error' in processed) {
+                console.error('Clipboard image processing error:', processed.error);
+                hapticsError();
+                return;
+            }
+
+            props.onImagesChange([...currentImages, processed]);
+            hapticsLight();
+        } catch (error) {
+            console.error('Failed to paste from clipboard:', error);
+            hapticsError();
+        }
+    }, [props.attachedImages, props.onImagesChange]);
+
     const handleImageButtonPress = React.useCallback(() => {
         hapticsLight();
         if (Platform.OS === 'web') {
@@ -415,10 +461,10 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 fileInputRef.current.click();
             }
         } else {
-            // Native: show action sheet to choose source
-            showImageSourceActionSheet(pickFromGallery, takePhoto);
+            // Native: show action sheet to choose source (including clipboard)
+            showImageSourceActionSheet(pickFromGallery, takePhoto, pasteFromClipboard);
         }
-    }, [pickFromGallery, takePhoto]);
+    }, [pickFromGallery, takePhoto, pasteFromClipboard]);
 
     const handleFileInputChange = React.useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
@@ -1083,7 +1129,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             onKeyPress={handleKeyPress}
                             onStateChange={handleInputStateChange}
                             maxHeight={120}
-                            onImagePaste={Platform.OS === 'web' ? handleImageFile as any : handleNativeImagePaste}
+                            onImagePaste={Platform.OS === 'web' ? handleImageFile as any : undefined}
                         />
                     </View>
 

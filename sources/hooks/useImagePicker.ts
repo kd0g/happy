@@ -244,16 +244,23 @@ export function useImagePicker(options: UseImagePickerOptions = {}): UseImagePic
  */
 export function showImageSourceActionSheet(
   pickFromGallery: () => void,
-  takePhoto: () => void
+  takePhoto: () => void,
+  pasteFromClipboard?: () => void
 ): void {
+  const buttons: { text: string; style?: 'cancel' | 'destructive' | 'default'; onPress?: () => void }[] = [
+    { text: '취소', style: 'cancel' },
+    { text: '갤러리에서 선택', onPress: pickFromGallery },
+    { text: '카메라로 촬영', onPress: takePhoto },
+  ];
+
+  if (pasteFromClipboard) {
+    buttons.push({ text: '클립보드에서 붙여넣기', onPress: pasteFromClipboard });
+  }
+
   Alert.alert(
     '이미지 첨부',
     '이미지를 어디서 가져올까요?',
-    [
-      { text: '취소', style: 'cancel' },
-      { text: '갤러리에서 선택', onPress: pickFromGallery },
-      { text: '카메라로 촬영', onPress: takePhoto },
-    ],
+    buttons,
     { cancelable: true }
   );
 }

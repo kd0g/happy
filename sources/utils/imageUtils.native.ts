@@ -14,6 +14,24 @@ import {
 } from './imageUtils';
 
 /**
+ * Get MIME type from URI (handles both file:// and data: URIs)
+ */
+function getMimeTypeFromUri(uri: string): string {
+  // Handle data: URLs
+  if (uri.startsWith('data:')) {
+    return extractMimeType(uri);
+  }
+
+  // Handle file:// URLs - check extension
+  const lowerUri = uri.toLowerCase();
+  if (lowerUri.endsWith('.png')) return 'image/png';
+  if (lowerUri.endsWith('.gif')) return 'image/gif';
+  if (lowerUri.endsWith('.webp')) return 'image/webp';
+  // Default to JPEG for jpg, jpeg, or unknown
+  return 'image/jpeg';
+}
+
+/**
  * Resize image using expo-image-manipulator (native only)
  * @param uri - The image URI (can be file:// or data:)
  * @param maxDimension - Maximum dimension for the longer side
@@ -24,7 +42,7 @@ export async function resizeImageNative(
   maxDimension: number = IMAGE_CONSTRAINTS.MAX_DIMENSION
 ): Promise<{ base64: string; width: number; height: number; mimeType: string }> {
   // Determine output format based on input
-  const mimeType = extractMimeType(uri);
+  const mimeType = getMimeTypeFromUri(uri);
   const format = mimeType === 'image/png'
     ? ImageManipulator.SaveFormat.PNG
     : ImageManipulator.SaveFormat.JPEG;

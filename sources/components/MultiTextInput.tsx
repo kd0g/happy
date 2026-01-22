@@ -222,19 +222,13 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
     }, [value, onSelectionChange, onStateChange]);
 
     /**
-     * Handle focus - check clipboard for images
-     * Uses InteractionManager to defer clipboard check until after focus animations
+     * Handle focus - no longer auto-checks clipboard as it was causing freezes
+     * Clipboard paste is now triggered manually via the image picker action sheet
      */
     const handleFocus = React.useCallback(() => {
-        // Check clipboard for image when input gains focus
-        if (onImagePaste) {
-            // Use InteractionManager to wait for focus animation to complete
-            // This prevents freeze when focusing the input
-            InteractionManager.runAfterInteractions(() => {
-                checkClipboardForImage();
-            });
-        }
-    }, [checkClipboardForImage, onImagePaste]);
+        // Clipboard check disabled - was causing UI freezes and unexpected behavior
+        // Users can paste from clipboard via the image attachment button
+    }, []);
 
     // Imperative handle for direct control
     React.useImperativeHandle(ref, () => ({
